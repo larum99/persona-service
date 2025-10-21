@@ -1,7 +1,11 @@
 package com.onclass.persona.domain.api;
 
-import reactor.core.publisher.Mono;
+import com.onclass.persona.domain.model.PersonaBootcamp;
+import reactor.core.publisher.Flux;
+
+import java.util.List;
 
 public interface PersonaBootcampServicePort {
-    Mono<Void> registrarPersonaBootcamp(Long personaId, Long bootcampId);
+    Flux<PersonaBootcamp> inscribirPersonaEnBootcamps(List<PersonaBootcamp> relaciones, String messageId);
+
 }

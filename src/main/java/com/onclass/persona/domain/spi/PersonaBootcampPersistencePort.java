@@ -4,8 +4,6 @@ import com.onclass.persona.domain.model.PersonaBootcamp;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.util.List;
-
 public interface PersonaBootcampPersistencePort {
     Mono<PersonaBootcamp> savePersonaBootcamp(PersonaBootcamp relacion);
     Flux<PersonaBootcamp> findBootcampsByPersonaId(Long personaId);

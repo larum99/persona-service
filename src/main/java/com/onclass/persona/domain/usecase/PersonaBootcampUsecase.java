@@ -11,8 +11,10 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public class PersonaBootcampUsecase implements PersonaBootcampServicePort {
 
@@ -26,71 +28,86 @@ public class PersonaBootcampUsecase implements PersonaBootcampServicePort {
     }
 
     @Override
-    public Mono<Void> registrarPersonaBootcamp(Long personaId, Long bootcampId) {
-        // 1️⃣ Consultar bootcamp destino
-        return bootcampClientPort.obtenerBootcampPorId(bootcampId)
-                .switchIfEmpty(Mono.error(new BusinessException(TechnicalMessage.BOOTCAMP_NOT_FOUND)))
-                .flatMap(bootcampNuevo ->
-                        // 2️⃣ Obtener inscripciones actuales
-                        personaBootcampPersistencePort.findBootcampsByPersonaId(personaId)
-                                .collectList()
-                                .flatMap(inscripciones ->
-                                        validarRestricciones(inscripciones, bootcampNuevo, bootcampId)
-                                                .then(
-                                                        // 3️⃣ Guardar relación si pasa validaciones
-                                                        personaBootcampPersistencePort.savePersonaBootcamp(
-                                                                new PersonaBootcamp(null, personaId, bootcampId, LocalDateTime.now())
-                                                        ).then()
-                                                )
-                                )
-                );
-    }
-
-    private Mono<Void> validarRestricciones(List<PersonaBootcamp> inscripciones,
-                                            BootcampSummary bootcampNuevo,
-                                            Long bootcampIdNuevo) {
-
-        // Máximo 5 bootcamps
-        if (inscripciones.size() >= 5) {
-            return Mono.error(new BusinessException(TechnicalMessage.MAX_BOOTCAMPS_REACHED));
+    public Flux<PersonaBootcamp> inscribirPersonaEnBootcamps(List<PersonaBootcamp> relaciones, String messageId) {
+        if (relaciones == null || relaciones.isEmpty()) {
+            return Flux.error(new BusinessException(TechnicalMessage.NO_BOOTCAMPS_SELECTED));
         }
 
-        // Ya inscrito
-        boolean yaInscrito = inscripciones.stream()
-                .anyMatch(i -> i.getBootcampId().equals(bootcampIdNuevo));
-        if (yaInscrito) {
-            return Mono.error(new BusinessException(TechnicalMessage.ALREADY_ENROLLED));
-        }
+        Long personaId = relaciones.get(0).getPersonaId();
 
-        // Si no hay inscripciones previas, pasa sin validar solapamiento
-        if (inscripciones.isEmpty()) {
-            return Mono.empty();
-        }
-
-        // 4️⃣ Validar solapamiento de fechas con llamadas reactivas a BootcampClientPort
-        return Flux.fromIterable(inscripciones)
-                .flatMap(inscripcion -> bootcampClientPort.obtenerBootcampPorId(inscripcion.getBootcampId()))
+        return personaBootcampPersistencePort.findBootcampsByPersonaId(personaId)
                 .collectList()
-                .flatMap(bootcampsInscritos -> {
-                    boolean haySolapamiento = bootcampsInscritos.stream()
-                            .anyMatch(b -> fechasSeSolapan(
-                                    b.getFechaLanzamiento(),
-                                    b.getFechaFin(),
-                                    bootcampNuevo.getFechaLanzamiento(),
-                                    bootcampNuevo.getFechaFin()
-                            ));
+                .flatMapMany(inscripcionesActuales -> {
 
-                    if (haySolapamiento) {
-                        return Mono.error(new BusinessException(TechnicalMessage.BOOTCAMP_OVERLAP));
+                    // 1️⃣ Validar máximo 5 bootcamps
+                    if (inscripcionesActuales.size() + relaciones.size() > 5) {
+                        return Flux.error(new BusinessException(TechnicalMessage.MAX_BOOTCAMPS_REACHED));
                     }
 
-                    return Mono.empty();
+                    // 2️⃣ Validar duplicados en la misma petición
+                    Set<Long> idsUnicos = relaciones.stream()
+                            .map(PersonaBootcamp::getBootcampId)
+                            .collect(Collectors.toSet());
+
+                    if (idsUnicos.size() < relaciones.size()) {
+                        return Flux.error(new BusinessException(TechnicalMessage.ALREADY_ENROLLED));
+                    }
+
+                    // 3️⃣ Validar que no esté inscrito ya en alguno
+                    boolean yaInscrito = inscripcionesActuales.stream()
+                            .anyMatch(actual -> idsUnicos.contains(actual.getBootcampId()));
+
+                    if (yaInscrito) {
+                        return Flux.error(new BusinessException(TechnicalMessage.ALREADY_ENROLLED));
+                    }
+
+                    // 4️⃣ Obtener los bootcamps (actuales + nuevos)
+                    Flux<BootcampSummary> actuales = Flux.fromIterable(inscripcionesActuales)
+                            .flatMap(pb -> bootcampClientPort.obtenerBootcampPorId(pb.getBootcampId()));
+
+                    Flux<BootcampSummary> nuevos = Flux.fromIterable(relaciones)
+                            .flatMap(pb -> bootcampClientPort.obtenerBootcampPorId(pb.getBootcampId()));
+
+                    return Flux.concat(actuales, nuevos)
+                            .collectList()
+                            .flatMapMany(bootcamps -> {
+
+                                // 5️⃣ Validar solapamientos
+                                if (haySolapamientos(bootcamps)) {
+                                    return Flux.error(new BusinessException(TechnicalMessage.BOOTCAMP_OVERLAP));
+                                }
+
+                                // 6️⃣ Si pasa todo → guardar
+                                return Flux.fromIterable(relaciones)
+                                        .flatMap(personaBootcampPersistencePort::savePersonaBootcamp);
+                            });
                 });
+    }
+
+    private boolean haySolapamientos(List<BootcampSummary> bootcamps) {
+        List<BootcampSummary> ordenados = bootcamps.stream()
+                .filter(b -> b.getFechaLanzamiento() != null && b.getFechaFin() != null)
+                .sorted(Comparator.comparing(BootcampSummary::getFechaLanzamiento))
+                .toList();
+
+        for (int i = 0; i < ordenados.size() - 1; i++) {
+            BootcampSummary actual = ordenados.get(i);
+            BootcampSummary siguiente = ordenados.get(i + 1);
+
+            if (fechasSeSolapan(
+                    actual.getFechaLanzamiento(),
+                    actual.getFechaFin(),
+                    siguiente.getFechaLanzamiento(),
+                    siguiente.getFechaFin())
+            ) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean fechasSeSolapan(LocalDate inicio1, LocalDate fin1,
                                     LocalDate inicio2, LocalDate fin2) {
-        if (inicio1 == null || fin1 == null || inicio2 == null || fin2 == null) return false;
         return (inicio1.isBefore(fin2) && fin1.isAfter(inicio2));
     }
 }

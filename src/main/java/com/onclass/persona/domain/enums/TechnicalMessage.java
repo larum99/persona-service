@@ -9,6 +9,7 @@ public enum TechnicalMessage {
     // ======== Mensajes específicos de Persona-Bootcamp ========
     PERSONA_NOT_FOUND("404", "La persona no existe", "personaId"),
     BOOTCAMP_NOT_FOUND("404-1", "El bootcamp no existe", "bootcampId"),
+    NO_BOOTCAMPS_SELECTED("400-4", "Debe seleccionar al menos un bootcamp para inscribirse", "bootcampIds"),
 
     MAX_BOOTCAMPS_REACHED("400-1", "La persona ya está inscrita en el número máximo de bootcamps permitidos (5)", "personaId"),
     ALREADY_ENROLLED("400-2", "La persona ya está inscrita en este bootcamp", "bootcampId"),
