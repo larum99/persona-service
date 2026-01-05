@@ -8,6 +8,7 @@ import com.onclass.persona.infrastructure.entrypoints.dto.PersonaBootcampDTO;
 import com.onclass.persona.infrastructure.entrypoints.mapper.PersonaBootcampMapper;
 import com.onclass.persona.infrastructure.entrypoints.utils.APIResponse;
 import com.onclass.persona.infrastructure.entrypoints.utils.Constants;
+import com.onclass.persona.infrastructure.entrypoints.utils.HandlerConstants;
 import com.onclass.persona.infrastructure.entrypoints.utils.ErrorDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,12 +46,41 @@ public class PersonaBootcampHandlerImpl {
                 .collectList()
                 .flatMapMany(list -> servicePort.inscribirPersonaEnBootcamps(list, messageId))
                 .collectList()
-                .flatMap(saved -> ServerResponse.status(HttpStatus.CREATED).bodyValue(saved))
+                .flatMap(saved -> {
+                    List<PersonaBootcampDTO> savedDTOs = saved.stream()
+                            .map(mapper::toDTO)
+                            .toList();
+                    APIResponse response = APIResponse.builder()
+                            .code(TechnicalMessage.PERSONA_BOOTCAMP_REGISTERED.getCode())
+                            .message(TechnicalMessage.PERSONA_BOOTCAMP_REGISTERED.getDescription())
+                            .identifier(messageId)
+                            .date(Instant.now().toString())
+                            .data(savedDTOs)
+                            .build();
+                    return ServerResponse.status(HttpStatus.CREATED).bodyValue(response);
+                })
                 .onErrorResume(ex -> buildErrorResponse(messageId, ex));
     }
 
+    public Mono<ServerResponse> obtenerPersonasPorBootcampId(ServerRequest request) {
+        String messageId = getMessageId(request);
+        Long bootcampId = Long.valueOf(request.pathVariable(HandlerConstants.BOOTCAMP_ID_PATH_VARIABLE));
+
+        return servicePort.obtenerPersonasPorBootcampId(bootcampId, messageId)
+                .collectList()
+                .flatMap(personas -> ServerResponse.ok().bodyValue(personas))
+                .onErrorResume(ex -> buildErrorResponse(messageId, ex));
+    }
+
+
     private Mono<ServerResponse> buildErrorResponse(String messageId, Throwable ex) {
         if (ex instanceof BusinessException bex) {
+            // Casos específicos que requieren 404
+            if (bex.getTechnicalMessage() == TechnicalMessage.BOOTCAMP_NOT_FOUND ||
+                bex.getTechnicalMessage() == TechnicalMessage.PERSONA_NOT_FOUND ||
+                bex.getTechnicalMessage() == TechnicalMessage.NO_PERSONAS_FOUND) {
+                return buildError(HttpStatus.NOT_FOUND, messageId, bex.getTechnicalMessage());
+            }
             return buildError(HttpStatus.BAD_REQUEST, messageId, bex.getTechnicalMessage());
         }
         if (ex instanceof TechnicalException tex) {

@@ -7,4 +7,7 @@ public class Constants {
     public static final String X_MESSAGE_ID = "x-message-id";
     public static final String BOOTCAMP_ERROR = "Error en Persona-Bootcamp - [ERROR]";
     public static final String PERSONA_BOOTCAMP_PATH = "/persona-bootcamps";
+    // Route paths
+    public static final String PERSONAS_ID_PATH = "/personas/{id}";
+    public static final String BOOTCAMP_ID_SEGMENT = "/bootcamp/{bootcampId}";
 }

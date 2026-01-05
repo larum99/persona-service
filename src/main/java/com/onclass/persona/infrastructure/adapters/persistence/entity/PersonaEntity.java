@@ -6,23 +6,18 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.springframework.data.annotation.Id;
-import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 
-@Table(name = EntityConstants.BOOTCAMP_PERSONA_TABLE)
+@Table(EntityConstants.PERSONA_TABLE)
 @Getter
 @Setter
 @AllArgsConstructor
 @NoArgsConstructor
-public class PersonaBootcampEntity {
+public class PersonaEntity {
 
     @Id
     private Long id;
-
-    @Column(EntityConstants.ID_PERSONA_COLUMN)
-    private Long personaId;
-
-    @Column(EntityConstants.ID_BOOTCAMP_COLUMN)
-    private Long bootcampId;
+    private String nombre;
+    private String correo;
+    private Integer edad;
 }
-

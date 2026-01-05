@@ -1,14 +1,15 @@
 package com.onclass.persona.domain.usecase;
 
 import com.onclass.persona.domain.api.PersonaBootcampServicePort;
+import com.onclass.persona.domain.constants.DomainConstants;
 import com.onclass.persona.domain.enums.TechnicalMessage;
 import com.onclass.persona.domain.exceptions.BusinessException;
 import com.onclass.persona.domain.model.PersonaBootcamp;
 import com.onclass.persona.domain.spi.BootcampClientPort;
 import com.onclass.persona.domain.spi.PersonaBootcampPersistencePort;
+import com.onclass.persona.domain.spi.ReporteClientPort;
 import com.onclass.persona.domain.utils.BootcampSummary;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
 import java.time.LocalDate;
 import java.util.Comparator;
@@ -20,11 +21,14 @@ public class PersonaBootcampUsecase implements PersonaBootcampServicePort {
 
     private final PersonaBootcampPersistencePort personaBootcampPersistencePort;
     private final BootcampClientPort bootcampClientPort;
+    private final ReporteClientPort reporteClientPort;
 
     public PersonaBootcampUsecase(PersonaBootcampPersistencePort personaBootcampPersistencePort,
-                                  BootcampClientPort bootcampClientPort) {
+                                  BootcampClientPort bootcampClientPort,
+                                  ReporteClientPort reporteClientPort) {
         this.personaBootcampPersistencePort = personaBootcampPersistencePort;
         this.bootcampClientPort = bootcampClientPort;
+        this.reporteClientPort = reporteClientPort;
     }
 
     @Override
@@ -37,51 +41,100 @@ public class PersonaBootcampUsecase implements PersonaBootcampServicePort {
 
         return personaBootcampPersistencePort.findBootcampsByPersonaId(personaId)
                 .collectList()
-                .flatMapMany(inscripcionesActuales -> {
+                .flatMapMany(inscripcionesActuales -> validarYProcesarInscripciones(relaciones, inscripcionesActuales));
+    }
 
-                    // 1️⃣ Validar máximo 5 bootcamps
-                    if (inscripcionesActuales.size() + relaciones.size() > 5) {
-                        return Flux.error(new BusinessException(TechnicalMessage.MAX_BOOTCAMPS_REACHED));
+    private Flux<PersonaBootcamp> validarYProcesarInscripciones(List<PersonaBootcamp> relaciones, List<PersonaBootcamp> inscripcionesActuales) {
+        if (excedeLimiteBootcamps(inscripcionesActuales.size(), relaciones.size())) {
+            return Flux.error(new BusinessException(TechnicalMessage.MAX_BOOTCAMPS_REACHED));
+        }
+
+        Set<Long> idsUnicos = extraerIdsUnicos(relaciones);
+        
+        if (tieneDuplicados(relaciones, idsUnicos) || yaEstaInscrito(inscripcionesActuales, idsUnicos)) {
+            return Flux.error(new BusinessException(TechnicalMessage.ALREADY_ENROLLED));
+        }
+
+        return validarSolapamientosYGuardar(relaciones, inscripcionesActuales);
+    }
+
+    private boolean excedeLimiteBootcamps(int inscripcionesActuales, int nuevasInscripciones) {
+        return inscripcionesActuales + nuevasInscripciones > DomainConstants.MAX_BOOTCAMPS_PER_PERSONA;
+    }
+
+    private Set<Long> extraerIdsUnicos(List<PersonaBootcamp> relaciones) {
+        return relaciones.stream()
+                .map(PersonaBootcamp::getBootcampId)
+                .collect(Collectors.toSet());
+    }
+
+    private boolean tieneDuplicados(List<PersonaBootcamp> relaciones, Set<Long> idsUnicos) {
+        return idsUnicos.size() < relaciones.size();
+    }
+
+    private boolean yaEstaInscrito(List<PersonaBootcamp> inscripcionesActuales, Set<Long> idsUnicos) {
+        return inscripcionesActuales.stream()
+                .anyMatch(actual -> idsUnicos.contains(actual.getBootcampId()));
+    }
+
+    private Flux<PersonaBootcamp> validarSolapamientosYGuardar(List<PersonaBootcamp> relaciones, List<PersonaBootcamp> inscripcionesActuales) {
+        Flux<BootcampSummary> actuales = obtenerBootcampsActuales(inscripcionesActuales);
+        Flux<BootcampSummary> nuevos = obtenerBootcampsNuevos(relaciones);
+
+        return Flux.concat(actuales, nuevos)
+                .collectList()
+                .flatMapMany(bootcamps -> {
+                    if (haySolapamientos(bootcamps)) {
+                        return Flux.error(new BusinessException(TechnicalMessage.BOOTCAMP_OVERLAP));
                     }
-
-                    // 2️⃣ Validar duplicados en la misma petición
-                    Set<Long> idsUnicos = relaciones.stream()
-                            .map(PersonaBootcamp::getBootcampId)
-                            .collect(Collectors.toSet());
-
-                    if (idsUnicos.size() < relaciones.size()) {
-                        return Flux.error(new BusinessException(TechnicalMessage.ALREADY_ENROLLED));
-                    }
-
-                    // 3️⃣ Validar que no esté inscrito ya en alguno
-                    boolean yaInscrito = inscripcionesActuales.stream()
-                            .anyMatch(actual -> idsUnicos.contains(actual.getBootcampId()));
-
-                    if (yaInscrito) {
-                        return Flux.error(new BusinessException(TechnicalMessage.ALREADY_ENROLLED));
-                    }
-
-                    // 4️⃣ Obtener los bootcamps (actuales + nuevos)
-                    Flux<BootcampSummary> actuales = Flux.fromIterable(inscripcionesActuales)
-                            .flatMap(pb -> bootcampClientPort.obtenerBootcampPorId(pb.getBootcampId()));
-
-                    Flux<BootcampSummary> nuevos = Flux.fromIterable(relaciones)
-                            .flatMap(pb -> bootcampClientPort.obtenerBootcampPorId(pb.getBootcampId()));
-
-                    return Flux.concat(actuales, nuevos)
-                            .collectList()
-                            .flatMapMany(bootcamps -> {
-
-                                // 5️⃣ Validar solapamientos
-                                if (haySolapamientos(bootcamps)) {
-                                    return Flux.error(new BusinessException(TechnicalMessage.BOOTCAMP_OVERLAP));
-                                }
-
-                                // 6️⃣ Si pasa todo → guardar
-                                return Flux.fromIterable(relaciones)
-                                        .flatMap(personaBootcampPersistencePort::savePersonaBootcamp);
-                            });
+                    return guardarYNotificar(relaciones);
                 });
+    }
+
+    private Flux<BootcampSummary> obtenerBootcampsActuales(List<PersonaBootcamp> inscripcionesActuales) {
+        return Flux.fromIterable(inscripcionesActuales)
+                .flatMap(pb -> bootcampClientPort.obtenerBootcampPorId(pb.getBootcampId()));
+    }
+
+    private Flux<BootcampSummary> obtenerBootcampsNuevos(List<PersonaBootcamp> relaciones) {
+        return Flux.fromIterable(relaciones)
+                .flatMap(pb -> bootcampClientPort.obtenerBootcampPorId(pb.getBootcampId()));
+    }
+
+    private Flux<PersonaBootcamp> guardarYNotificar(List<PersonaBootcamp> relaciones) {
+        return Flux.fromIterable(relaciones)
+                .flatMap(relacion ->
+                        personaBootcampPersistencePort.savePersonaBootcamp(relacion)
+                                .then(reporteClientPort.incrementarPersonasInscritas(relacion.getBootcampId()))
+                                .thenReturn(relacion)
+                );
+    }
+
+    @Override
+    public Flux<PersonaBootcamp> obtenerPersonasPorBootcampId(Long bootcampId, String messageId) {
+        return validarBootcampExisteYObtenerPersonas(bootcampId);
+    }
+
+    private Flux<PersonaBootcamp> validarBootcampExisteYObtenerPersonas(Long bootcampId) {
+        return bootcampClientPort.obtenerBootcampPorId(bootcampId)
+                .flatMapMany(bootcamp -> obtenerPersonasDelBootcamp(bootcampId))
+                .onErrorMap(this::mapearErrorBootcamp);
+    }
+
+    private Flux<PersonaBootcamp> obtenerPersonasDelBootcamp(Long bootcampId) {
+        return personaBootcampPersistencePort.findPersonasByBootcampId(bootcampId)
+                .switchIfEmpty(Flux.error(new BusinessException(TechnicalMessage.NO_PERSONAS_FOUND)));
+    }
+
+    private Throwable mapearErrorBootcamp(Throwable ex) {
+        if (esErrorBootcampNoEncontrado(ex)) {
+            return new BusinessException(TechnicalMessage.BOOTCAMP_NOT_FOUND);
+        }
+        return ex;
+    }
+
+    private boolean esErrorBootcampNoEncontrado(Throwable ex) {
+        return ex.getMessage() != null && ex.getMessage().contains(DomainConstants.HTTP_NOT_FOUND_CODE);
     }
 
     private boolean haySolapamientos(List<BootcampSummary> bootcamps) {

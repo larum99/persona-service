@@ -14,6 +14,8 @@ public enum TechnicalMessage {
     MAX_BOOTCAMPS_REACHED("400-1", "La persona ya está inscrita en el número máximo de bootcamps permitidos (5)", "personaId"),
     ALREADY_ENROLLED("400-2", "La persona ya está inscrita en este bootcamp", "bootcampId"),
     BOOTCAMP_OVERLAP("400-3", "El bootcamp se solapa en fechas con otro en el que la persona ya está inscrita", "bootcampId"),
+    NO_PERSONAS_FOUND("404-2", "No se encontraron personas inscritas en este bootcamp", "bootcampId"),
+
 
     // ======== Mensajes de persistencia ========
     PERSONA_BOOTCAMP_SAVE_FAILED("500-1", "No se pudo registrar la inscripción de la persona al bootcamp", ""),

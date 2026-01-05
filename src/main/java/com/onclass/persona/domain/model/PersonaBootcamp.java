@@ -1,7 +1,5 @@
 package com.onclass.persona.domain.model;
 
-import java.time.LocalDateTime;
-
 public class PersonaBootcamp {
 
     private Long id;

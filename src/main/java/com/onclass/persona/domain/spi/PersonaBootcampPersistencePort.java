@@ -7,4 +7,5 @@ import reactor.core.publisher.Mono;
 public interface PersonaBootcampPersistencePort {
     Mono<PersonaBootcamp> savePersonaBootcamp(PersonaBootcamp relacion);
     Flux<PersonaBootcamp> findBootcampsByPersonaId(Long personaId);
+    Flux<PersonaBootcamp> findPersonasByBootcampId(Long bootcampId);
 }
