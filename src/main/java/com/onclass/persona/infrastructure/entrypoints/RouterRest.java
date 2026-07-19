@@ -1,5 +1,6 @@
 package com.onclass.persona.infrastructure.entrypoints;
 
+import com.onclass.persona.application.configSwagger.PersonaBootcampApiDoc;
 import com.onclass.persona.infrastructure.entrypoints.handler.PersonaBootcampHandlerImpl;
 import com.onclass.persona.infrastructure.entrypoints.utils.Constants;
 import org.springframework.context.annotation.Bean;
@@ -14,7 +15,7 @@ import static org.springframework.web.reactive.function.server.RouterFunctions.r
 public class RouterRest {
 
     @Bean
-    //@PersonaBootcampApiDoc
+    @PersonaBootcampApiDoc
     public RouterFunction<ServerResponse> personaBootcampRoutes(PersonaBootcampHandlerImpl handler) {
         return route(POST(Constants.PERSONA_BOOTCAMP_PATH), handler::inscribirPersonaEnBootcamps);
     }

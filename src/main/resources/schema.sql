@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS personas (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    nombre VARCHAR(255) NOT NULL,
+    correo VARCHAR(255),
+    edad INT
+);
+
+CREATE TABLE IF NOT EXISTS bootcamp_persona (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id_persona BIGINT NOT NULL,
+    id_bootcamp BIGINT NOT NULL
+);
